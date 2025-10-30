@@ -1,0 +1,10 @@
+FROM golang:1.22-alpine as build
+WORKDIR /app
+COPY identity/main.go .
+RUN go mod init nt_identity && go mod tidy && go build -o identity main.go
+
+FROM alpine
+WORKDIR /app
+COPY --from=build /app/identity .
+EXPOSE 8081
+CMD ["./identity"]

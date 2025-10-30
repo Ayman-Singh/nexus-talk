@@ -1,0 +1,10 @@
+FROM golang:1.22-alpine as build
+WORKDIR /app
+COPY messaging/main.go .
+RUN go mod init nt_messaging && go mod tidy && go build -o messaging main.go
+
+FROM alpine
+WORKDIR /app
+COPY --from=build /app/messaging .
+EXPOSE 8082
+CMD ["./messaging"]
