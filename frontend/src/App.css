@@ -1,3 +1,4 @@
+@import "tailwindcss";
 .App {
   text-align: center;
 }
@@ -35,4 +36,14 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Landing page specific small helpers */
+.hero-card {
+  border-radius: 1rem;
+}
+
+/* soft glow for primary CTA when focused */
+.cta-focus:focus {
+  box-shadow: 0 8px 30px rgba(99,102,241,0.12);
 }
