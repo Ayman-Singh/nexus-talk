@@ -8,13 +8,26 @@ import (
 	"strings"
 )
 
+func withCORS(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/register", registerHandler)
 	mux.HandleFunc("/login", loginHandler)
 	mux.HandleFunc("/profile/", profileHandler)
-	log.Println("Identity service listening on :8081")
-	log.Fatal(http.ListenAndServe(":8081", mux))
+	log.Println("Identity service listening on :8081 (CORS enabled)")
+	log.Fatal(http.ListenAndServe(":8081", withCORS(mux)))
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
