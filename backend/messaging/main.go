@@ -72,6 +72,8 @@ func main() {
 	mux.HandleFunc("/v1/messages", messagesHandler)
 	// Get messages by thread id: /v1/messages/{threadId}
 	mux.HandleFunc("/v1/messages/", threadMessagesHandler)
+	// List threads for a user: /v1/threads?user_id=xxx
+	mux.HandleFunc("/v1/threads", listThreadsHandler)
 	// Create or fetch a direct thread for two users
 	mux.HandleFunc("/v1/threads/direct", directThreadHandler)
 
@@ -365,6 +367,81 @@ func findOrCreateDirectThread(db *sql.DB, u1, u2 string) (string, error) {
 		return "", err
 	}
 	return tid, nil
+}
+
+// listThreadsHandler returns a lightweight summary of direct threads for a user
+// GET /v1/threads?user_id=XYZ -> [{thread_id, other_user_id, last_message_at}]
+func listThreadsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		http.Error(w, "missing user_id", http.StatusBadRequest)
+		return
+	}
+	type ThreadSummary struct {
+		ThreadID      string    `json:"thread_id"`
+		OtherUserID   string    `json:"other_user_id"`
+		LastMessageAt time.Time `json:"last_message_at"`
+	}
+	summaries := []ThreadSummary{}
+	if useMemory {
+		// Memory mode: derive from memMsgs and memThreads
+		memLock.Lock()
+		lastByThread := map[string]time.Time{}
+		// Build reverse map from thread->pair to identify other user
+		pairByThread := map[string][2]string{}
+		for pair, tid := range memThreads {
+			parts := strings.Split(pair, "|")
+			if len(parts) == 2 {
+				pairByThread[tid] = [2]string{parts[0], parts[1]}
+			}
+		}
+		for _, m := range memMsgs {
+			if m.SentAt.After(lastByThread[m.ThreadID]) {
+				lastByThread[m.ThreadID] = m.SentAt
+			}
+		}
+		for tid, pair := range pairByThread {
+			if pair[0] == userID || pair[1] == userID {
+				other := pair[0]
+				if other == userID {
+					other = pair[1]
+				}
+				summaries = append(summaries, ThreadSummary{ThreadID: tid, OtherUserID: other, LastMessageAt: lastByThread[tid]})
+			}
+		}
+		memLock.Unlock()
+	} else {
+		// SQL mode: find direct threads user participates in, join to other member, get last message time
+		q := `SELECT t.id, m2.user_id AS other_user, COALESCE(MAX(msg.sent_at), t.created_at) AS last_message
+			  FROM threads t
+			  JOIN thread_members m1 ON m1.thread_id=t.id AND m1.user_id=$1
+			  JOIN thread_members m2 ON m2.thread_id=t.id AND m2.user_id<>$1
+			  LEFT JOIN messages msg ON msg.thread_id=t.id
+			  WHERE t.type='direct'
+			  GROUP BY t.id, other_user, t.created_at
+			  ORDER BY last_message DESC`
+		rows, err := db.Query(q, userID)
+		if err != nil {
+			log.Printf("listThreads query error: %v", err)
+			http.Error(w, "internal", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var ts ThreadSummary
+			if err := rows.Scan(&ts.ThreadID, &ts.OtherUserID, &ts.LastMessageAt); err != nil {
+				log.Printf("scan thread summary: %v", err)
+				continue
+			}
+			summaries = append(summaries, ts)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summaries)
 }
 
 // sendDemoHandler and inboxDemoHandler preserve the quick demo endpoints used
