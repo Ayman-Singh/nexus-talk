@@ -125,29 +125,22 @@ Logical View
 Presentation (Clients) → Edge (Gateway) → Application Services → Data/In-
 frastructure. Higher layers depend on lower layers only.
 3.2 Service Catalogue
-Service Responsibility
-Identity & Auth Registration/login by phone & OTP; user profile; RBAC;
-OAuth tokens.
-Session & Devices Device linking (multi-device), key provisioning, pre-keys, and
-session metadata.
-Messaging 1:1 and group messaging, message states (sent, delivered, read),
-ephemeral timers, broadcasts.
-Groups & Channels Group lifecycle, roles/permissions, threads, community folders,
-channel scheduling.
-Presence Online/last-seen, typing, stealth mode rules.
-Media Upload/download, thumbnails, view-once, download-blocking,
-content-hashing.
-Calls/RTC Signalling, WebRTC, TURN/STUN, SFU for multi-party,
-recording (consent-gated).
-Search Full-text over messages (server), on-device media indexing (ob-
-ject/OCR).
-Payments In-chat transfers; channel subscriptions; ledger & gateway inte-
-gration.
-Moderation Reporting, context capture, triage, automated sanction-
-s/strikes.
-Analytics Channel analytics, dashboards, counters.
-Notification Push notifications, rate limiting.
-Settings Privacy matrices, username & discoverability.
+| Service           | Responsibility                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| Identity & Auth   | Registration/login by phone & OTP; user profile; RBAC;OAuth tokens.                           |
+| Session & Devices | Device linking (multi-device), key provisioning, pre-keys, and session metadata.              |
+| Messaging         | 1:1 and group messaging, message states (sent, delivered, read),ephemeral timers, broadcasts. |
+| Groups & Channels | Group lifecycle, roles/permissions, threads, community folders, channel scheduling.           |
+| Presence          | Online/last-seen, typing, stealth mode rules.                                                 |
+| Media             | Upload/download, thumbnails, view-once, download-blocking, content-hashing.                   |
+| Calls/RTC         | Signalling, WebRTC, TURN/STUN, SFU for multi-party, recording (consent-gated).                |
+| Search            | Full-text over messages (server), on-device media indexing (object/OCR).                      |
+| Payments          | In-chat transfers; channel subscriptions; ledger & gateway integration.                       |
+| Moderation        | Reporting, context capture, triage, automated sanctions/strikes.                              |
+| Analytics         | Channel analytics, dashboards, counters.                                                      |
+| Notification      | Push notifications, rate limiting.                                                            |
+| Settings          | Privacy matrices, username & discoverability.                                                 |
+
 3.3 Data Ownership
 Each service owns its data (schema per service). Cross-service reads through APIs; cross-
 service writes via events to avoid tight coupling.
@@ -204,3 +197,149 @@ k8s / , helm / , terraform / , ci - cd /
 Clean interfaces, code reviews, unit/integration tests, contract tests, linting, SAST/-
 DAST, and observability.
 7
+Authentication . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+POST /v1/auth/start — start OTP. POST /v1/auth/verify — verify code, mint
+tokens.
+7.2 Messaging . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+POST / v1 / messages
+Body : { toId , kind , ciphertext , mediaRef ? , ttl ? , viewOnce ? }
+GET / v1 / messages /{ chatId }? since =...
+POST / v1 / messages /{ id }/ ack
+7.3 Groups & Channels . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+POST / v1 / groups
+POST / v1 / channels
+POST / v1 / channels /{ id }/ schedule
+GET / v1 / channels /{ id }/ analytics
+7.4 Moderation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+POST / v1 / reports
+POST / v1 / moderation /{ userId }/ strike
+
+7.5 Payments . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+POST / v1 / payments / transfer
+POST / v1 / subscriptions /{ channelId }
+
+CHAPTER 8
+
+Feature Designs (by SRS Modules)
+8.1 Core Communication
+Messaging, media, calls, polls, search, and customization follow modular patterns.
+
+8.2 Multi-Device
+QR linking establishes trust; per-device sessions; message sync; “Saved Messages” self
+chat.
+
+8.3 Privacy Tools
+Disappearing messages via TTL; view-once assets; broadcast lists with private replies.
+
+8.4 Channels & Communities
+Private/public; invites; scheduling; analytics; monetization; threads; community folders.
+
+8.5 AI Features
+On-device STT; smart replies; local media tagging; meeting summaries with consent.
+
+8.6 Moderation & Safety
+Reports; automated filters; strike system; parental link with consent.
+
+
+CHAPTER 9
+
+Data Design & Schema
+
+| Entity   | Key Fields                                                  |
+| -------- | ----------------------------------------------------------- |
+| User     | user_id, phone, username, profile, privacy_matrix.          |
+| Device   | device_id, user_id, keys, last_seen.                        |
+| Message  | msg_id, chat_id, sender, ciphertext, media_ref, ttl, state. |
+| Chat     | chat_id, members, roles, policy.                            |
+| Channel  | channel_id, owner, settings, subscribers.                   |
+| Schedule | schedule_id, payload_ref, due_ts, status.                   |
+| Report   | report_id, target, reason, status.                          |
+| Payment  | txn_id, payer, payee, amount, status.                       |
+| Backup   | user_id, blob_ref, created_at.                              |
+
+CHAPTER 10
+
+Security & Privacy
+10.1 End-to-End Encryption
+• X3DH for session setup; Double Ratchet for forward secrecy.
+• Groups use Sender Keys; per-device queues maintain E2EE.
+
+10.2 Key Management
+Users own backup keys; servers never see plaintext; rotations automated; compromised
+devices revoked.
+
+10.3 Privacy Controls
+Profile/status visibility, stealth mode, screenshot notification, download-blocking.
+
+10.4 Hardening
+TLS; OAuth2; prepared statements; CSP; rate limits; audits.
+
+CHAPTER 11
+
+Quality Attributes & NFR Mapping
+
+| Attribute       | Design Response                             |
+| --------------- | ------------------------------------------- |
+| Performance     | Low-latency websockets; CDN; async fan-out. |
+| Reliability     | Replication; retries; idempotent ops.       |
+| Security        | Signal E2EE; audits; secret vault.          |
+| Usability       | Accessible UI; instant feedback.            |
+| Maintainability | Modular services; clear APIs.               |
+| Portability     | Standard protocols; multi-cloud ready.      |
+| Testability     | Contract tests; simulators.                 |
+1CHAPTER 12
+
+Sequence Models
+12.1 Text Message Send
+1. Client obtains pre-keys; establishes session.
+2. Encrypts; POST /messages.
+3. Service persists; emits event.
+4. Recipient decrypts; ack sent.
+
+12.2 Channel Scheduled Post
+1. Admin creates post with timestamp.
+2. Scheduler enqueues; Messaging fan-out.
+3. Analytics updates; notifications sent.
+
+12.3 Call Setup
+1. Invite → ICE/TURN.
+2. SFU negotiates; media flows.
+3. End; CDR stored.
+
+1CHAPTER 13
+
+State Models
+13.1 Message Lifecycle
+Draft → Queued → Sent → Delivered → Read → Expired.
+
+13.2 Call Lifecycle
+Idle → Ringing → Connected → On Hold → Ended/Failed.
+
+13.3 Report Ticket
+New → Triaged → Pending → Resolved → Sanctioned/Dismissed.
+
+CHAPTER 14
+
+Risks, Testing & Traceability
+14.1 Key Risks
+• Crypto misuse → vetted libraries & audits.
+• Scalability → autoscaling, load tests.
+• Abuse → moderation filters, quick appeals.
+
+14.2 Testing Strategy
+Unit, integration, contract, e2e, performance, security, chaos. Trace tests to SRS features.
+
+14.3 SRS–Design Traceability
+
+| SRS Feature        | Design Elements                             |
+| ------------------ | ------------------------------------------- |
+| Registration/Login | Identity service; OTP; device keys.         |
+| Messaging          | Messaging service; E2EE sessions.           |
+| File               | Sharing Media service; encrypted manifests. |
+| Calls              | RTC stack; consented recordings.            |
+| Groups/Polls       | Group/Channel; poll subtype.                |
+| Channels           | Scheduler; analytics; subscriptions.        |
+| Privacy            | Controls TTL scheduler; stealth; view-once. |
+| AI                 | Features STT/Summarizer workers.            |
+| Moderation         | Reporting; filters; strikes.                |
+| Payments           | Payment service; ledger; gateway.           |
