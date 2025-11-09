@@ -1,7 +1,8 @@
-FROM golang:1.22-alpine as build
+FROM golang:1.24-alpine AS build
 WORKDIR /app
-COPY messaging/main.go .
-RUN go mod init nt_messaging && go mod tidy && go build -o messaging main.go
+COPY messaging/go.mod messaging/main.go ./
+RUN go mod tidy
+RUN go build -o messaging main.go
 
 FROM alpine
 WORKDIR /app

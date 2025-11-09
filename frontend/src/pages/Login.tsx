@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "react-router-dom"
 import React, { useState } from "react"
+import { login } from "../api"
 
 export default function Login() {
   const [username, setUsername] = useState("")
@@ -11,12 +12,10 @@ export default function Login() {
     e.preventDefault()
     setErr("")
     try {
-      const resp = await fetch("http://localhost:8081/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      })
-      if (!resp.ok) throw new Error("Invalid credentials")
+  const { user, token } = await login(username, password)
+  // Use sessionStorage so two windows can log in as different users without clobbering
+  sessionStorage.setItem("nt_user", JSON.stringify(user))
+  sessionStorage.setItem("nt_token", token)
       navigate("/inbox")
     } catch (e: any) {
       setErr(e.message)

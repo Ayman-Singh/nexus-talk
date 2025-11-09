@@ -5,7 +5,7 @@ export async function login(username: string, password: string) {
     body: JSON.stringify({username, password})
   });
   if (!r.ok) throw new Error('Login failed');
-  return r.json();
+  return r.json() as Promise<{token:string,user:{id:string,username:string}}>;
 }
 
 export async function register(username: string, email: string, password: string) {
@@ -25,19 +25,33 @@ export async function getMessages(threadId: string) {
 }
 
 export async function sendMessage(from_id: string, to_id: string, content: string) {
-  const resp = await fetch("http://localhost:8082/send", {
+  // Use unified /v1/messages endpoint which will find/create a direct thread
+  const resp = await fetch("http://localhost:8082/v1/messages", {
     method: "POST",
     headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({from: from_id, to: to_id, content})
+    body: JSON.stringify({sender_id: from_id, to_id, content})
   })
   if (!resp.ok) throw new Error('Send failed')
-  return resp.json()
+  return resp.json() as Promise<{id:string, thread_id:string, sender_id:string, content:string, sent_at:string}>;
 }
 
-export async function fetchInbox(user_id: string) {
-  const resp = await fetch(`http://localhost:8082/inbox?user_id=${user_id}`)
-  if (!resp.ok) throw new Error('Fetch inbox failed')
-  return resp.json()
+export interface Message { id:string; sender_id:string; thread_id:string; content:string; sent_at:string }
+
+export async function fetchThread(thread_id: string): Promise<Message[]> {
+  const r = await fetch(`http://localhost:8082/v1/messages/${thread_id}`)
+  if (!r.ok) throw new Error('fetchThread failed')
+  return r.json()
+}
+
+export async function fetchOrCreateDirectThread(selfId: string, otherId: string): Promise<string> {
+  const r = await fetch("http://localhost:8082/v1/threads/direct", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ user_a: selfId, user_b: otherId })
+  })
+  if (!r.ok) throw new Error('direct thread failed')
+  const js = await r.json() as {thread_id:string}
+  return js.thread_id
 }
 
 // Channel/group API

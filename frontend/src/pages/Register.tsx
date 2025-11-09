@@ -19,6 +19,12 @@ export default function Register() {
         body: JSON.stringify({ username, email, password }),
       })
       if (!resp.ok) throw new Error("Registration failed")
+      const js = await resp.json()
+      // Store user temporarily so second tab can see them without refresh list endpoint yet
+      const listRaw = localStorage.getItem("nt_reg_users")
+      const arr = listRaw ? JSON.parse(listRaw) : []
+      arr.push(js)
+      localStorage.setItem("nt_reg_users", JSON.stringify(arr))
       setOk(true)
       setTimeout(() => navigate("/login"), 1200)
     } catch (e: any) {

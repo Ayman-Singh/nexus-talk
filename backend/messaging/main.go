@@ -26,10 +26,11 @@ type Message struct {
 }
 
 var (
-	db        *sql.DB
-	memLock   sync.Mutex
-	memMsgs   []Message
-	useMemory bool
+	db         *sql.DB
+	memLock    sync.Mutex
+	memMsgs    []Message
+	memThreads = map[string]string{} // key: direct pair key "u1|u2" -> threadID
+	useMemory  bool
 )
 
 func withCORS(h http.Handler) http.Handler {
@@ -71,6 +72,8 @@ func main() {
 	mux.HandleFunc("/v1/messages", messagesHandler)
 	// Get messages by thread id: /v1/messages/{threadId}
 	mux.HandleFunc("/v1/messages/", threadMessagesHandler)
+	// Create or fetch a direct thread for two users
+	mux.HandleFunc("/v1/threads/direct", directThreadHandler)
 
 	// Keep old quick endpoints for local demo compatibility
 	mux.HandleFunc("/send", sendDemoHandler)
@@ -87,6 +90,11 @@ func ensureSchema(db *sql.DB) error {
 			id UUID PRIMARY KEY,
 			type VARCHAR(16) CHECK (type IN ('direct','group','channel')) DEFAULT 'direct',
 			created_at TIMESTAMP DEFAULT now()
+		)`,
+		`CREATE TABLE IF NOT EXISTS thread_members (
+			thread_id UUID REFERENCES threads(id) ON DELETE CASCADE,
+			user_id UUID NOT NULL,
+			PRIMARY KEY (thread_id, user_id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS messages (
 			id UUID PRIMARY KEY,
@@ -136,13 +144,26 @@ func messagesHandler(w http.ResponseWriter, r *http.Request) {
 		// If no thread supplied, create a direct thread if to_id is present.
 		threadID := body.ThreadID
 		if threadID == "" && body.ToID != "" {
-			threadID = uuid.New().String()
-			if !useMemory {
-				if _, err := db.Exec(`INSERT INTO threads (id,type) VALUES ($1,'direct')`, threadID); err != nil {
-					log.Printf("failed to create thread: %v", err)
+			// Find or create a direct thread between SenderID and ToID
+			u1, u2 := canonicalPair(body.SenderID, body.ToID)
+			if useMemory {
+				key := u1 + "|" + u2
+				memLock.Lock()
+				tid, ok := memThreads[key]
+				if !ok {
+					tid = uuid.New().String()
+					memThreads[key] = tid
+				}
+				memLock.Unlock()
+				threadID = tid
+			} else {
+				tid, err := findOrCreateDirectThread(db, u1, u2)
+				if err != nil {
+					log.Printf("failed to get/create direct thread: %v", err)
 					http.Error(w, "internal", http.StatusInternalServerError)
 					return
 				}
+				threadID = tid
 			}
 		}
 
@@ -274,6 +295,76 @@ func sendMessagesByThread(w http.ResponseWriter, r *http.Request, threadID strin
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
+}
+
+// directThreadHandler accepts POST {"user_a":"...","user_b":"..."} and returns {thread_id}
+func directThreadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		UserA string `json:"user_a"`
+		UserB string `json:"user_b"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.UserA == "" || body.UserB == "" {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	u1, u2 := canonicalPair(body.UserA, body.UserB)
+	var tid string
+	if useMemory {
+		key := u1 + "|" + u2
+		memLock.Lock()
+		existing, ok := memThreads[key]
+		if !ok {
+			existing = uuid.New().String()
+			memThreads[key] = existing
+		}
+		memLock.Unlock()
+		tid = existing
+	} else {
+		var err error
+		tid, err = findOrCreateDirectThread(db, u1, u2)
+		if err != nil {
+			log.Printf("direct thread error: %v", err)
+			http.Error(w, "internal", http.StatusInternalServerError)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"thread_id": tid})
+}
+
+// canonicalPair sorts two IDs to build a stable key
+func canonicalPair(a, b string) (string, string) {
+	if a <= b {
+		return a, b
+	}
+	return b, a
+}
+
+// findOrCreateDirectThread ensures a single thread for the pair (u1,u2)
+func findOrCreateDirectThread(db *sql.DB, u1, u2 string) (string, error) {
+	// Try to find existing direct thread with exactly these two members
+	var tid string
+	q := `SELECT t.id FROM threads t
+		  JOIN thread_members m1 ON m1.thread_id=t.id AND m1.user_id=$1
+		  JOIN thread_members m2 ON m2.thread_id=t.id AND m2.user_id=$2
+		  WHERE t.type='direct'
+		  LIMIT 1`
+	if err := db.QueryRow(q, u1, u2).Scan(&tid); err == nil {
+		return tid, nil
+	}
+	// Create new
+	tid = uuid.New().String()
+	if _, err := db.Exec(`INSERT INTO threads (id,type) VALUES ($1,'direct')`, tid); err != nil {
+		return "", err
+	}
+	if _, err := db.Exec(`INSERT INTO thread_members (thread_id,user_id) VALUES ($1,$2),($1,$3)`, tid, u1, u2); err != nil {
+		return "", err
+	}
+	return tid, nil
 }
 
 // sendDemoHandler and inboxDemoHandler preserve the quick demo endpoints used
